@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
+import theme from '../theme';
 
 // ---- Types ----
 interface User {
@@ -31,7 +32,7 @@ interface AuthContextType {
 
 // ---- Component ----
 const ProfileScreen: FC = () => {
-  const { currentUser, navigateTo, setIsLoggedIn, setCurrentScreen } =
+  const { currentUser, navigateTo, setIsLoggedIn, setCurrentScreen, setThemeMode, themeMode  } =
     useAuth() as AuthContextType;
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -57,6 +58,9 @@ const ProfileScreen: FC = () => {
       await AsyncStorage.removeItem('isLoggedIn');
     }, 2000);
   };
+
+
+
 
   // ---- Go to Login ----
   const handleGoToLogin = (): void => {
@@ -131,7 +135,7 @@ const ProfileScreen: FC = () => {
         </View>
 
         {/* Profile Card */}
-        <View style={styles.profileCard}>
+        <View style={[styles.profileCard, {backgroundColor: themeMode === 'light' ? theme.lightColors.button : theme.darkColors.button}]}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>Profile Information</Text>
           </View>
@@ -160,6 +164,16 @@ const ProfileScreen: FC = () => {
         >
           <Text style={styles.logoutText}>
             {isLoggingOut ? 'Signing Out...' : 'Sign Out'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.logoutButton, isLoggingOut && styles.logoutButtonDisabled]}
+          onPress={() => setThemeMode(themeMode === 'light' ? 'dark' : 'light')}
+          disabled={isLoggingOut}
+        >
+          <Text style={styles.logoutText}>
+            Change Theme
           </Text>
         </TouchableOpacity>
       </View>
@@ -220,7 +234,6 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   profileCard: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
     borderRadius: 20,
     marginBottom: 30,
     shadowColor: '#000',
@@ -263,6 +276,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
+    marginTop:20
   },
   logoutButtonDisabled: { backgroundColor: 'rgba(189, 195, 199, 0.9)' },
   logoutText: {

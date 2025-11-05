@@ -10,10 +10,13 @@ import {
   Animated,
   ImageBackground,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { Formik, FormikHelpers } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '../context/AuthContext';
+import theme from '../theme';
+import * as Keychain from 'react-native-keychain';
 
 // ---- Types ----
 interface User {
@@ -51,8 +54,13 @@ const loginValidationSchema = Yup.object().shape({
 // ---- Component ----
 const LoginScreen: FC = () => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const { login, navigateTo, currentUser } = useAuth() as AuthContextType;
+  const { login, navigateTo, currentUser, themeMode } = useAuth() as AuthContextType;
   const [loginError, setLoginError] = useState<string>('');
+   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [lockedOut, setLockedOut] = useState(false);
+    const [attempts, setAttempts] = useState(0);
+    const [loginAttempts, setLoginAttempts] = useState(0);
+    console.log('LoginScreen - loginAttempts:', loginAttempts);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -62,44 +70,124 @@ const LoginScreen: FC = () => {
     }).start();
   }, [fadeAnim]);
 
-  const handleLogin = async (
-    values: LoginFormValues,
-    { resetForm }: FormikHelpers<LoginFormValues>,
-  ): Promise<void> => {
+const storeCredentials = async (currentUser : any) => {
+    console.log('⚡ Storing credentials for:', email);
     try {
-      setLoginError('');
-
-      if (!currentUser) {
-        setLoginError('No registered user found. Please register first.');
-        return;
-      }
-
-      const emailMatch =
-        values.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
-      const passwordMatch = values.password.trim() === currentUser.password.trim();
-
-      if (!emailMatch || !passwordMatch) {
-        setLoginError('Invalid email or password. Please try again.');
-        return;
-      }
-
-      const userData: User = {
-        email: currentUser.email,
-        firstName: currentUser.firstName,
-        lastName: currentUser.lastName,
-        phoneNumber: currentUser.phoneNumber,
-        password: currentUser.password,
-        confirmPassword: currentUser.confirmPassword,
-      };
-
-      await login(userData);
-      resetForm();
-      setLoginError('');
-    } catch (error) {
-      console.error('Login error:', error);
-      setLoginError('Something went wrong. Please try again.');
+        await Keychain.setGenericPassword(email, password, {
+            accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY,
+            accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+            securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
+        });
+        console.log('✅ Credentials securely stored');
+        
+    } catch (e) {
+        console.log('❌ Failed to store credentials:', e);
     }
-  };
+};
+
+
+    const handleBiometricLogin = async (currentUser : any) => {
+        if (lockedOut) {
+            Alert.alert('Locked Out', 'Please try again later.');
+            return;
+        }
+
+        try {
+            const credentials = await Keychain.getGenericPassword({
+                authenticationPrompt: {
+                    title: 'Login with Fingerprint',
+                    subtitle: 'Authenticate to unlock your account',
+                    description: 'Use your fingerprint to log in securely.',
+                },
+            });
+
+            if (credentials) {
+                console.log('✅ Auth success:', credentials);
+                Alert.alert('Success', 'Welcome back!');
+                const userData: User = {
+                email: currentUser.email,
+                firstName: currentUser.firstName,
+                lastName: currentUser.lastName,
+                phoneNumber: currentUser.phoneNumber,
+                password: currentUser.password,
+                confirmPassword: currentUser.confirmPassword,
+            };
+        await login(userData);
+                // Optionally auto-login user:
+                // await login({ email: credentials.username, password: credentials.password });
+            } else {
+                Alert.alert('Cancelled', 'Fingerprint login was cancelled.');
+            }
+        } catch (err: any) {
+            console.log('Biometric error:', err);
+            setAttempts(prev => {
+                const next = prev + 1;
+                if (next >= 5) setLockedOut(true);
+                return next;
+            });
+        }
+    };
+
+    const handleLogin = async (
+        values: LoginFormValues,
+        { resetForm }: FormikHelpers<LoginFormValues>,
+    ): Promise<void> => {
+        console.log('Login attempt with values:', values);
+
+        try {
+            setLoginError('');
+
+            if (!currentUser) {
+                setLoginError('No registered user found. Please register first.');
+                return;
+            }
+
+            const emailMatch =
+                values.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+            const passwordMatch = values.password.trim() === currentUser.password.trim();
+
+            if (!emailMatch || !passwordMatch) {
+                // Increase failed attempts
+                setLoginAttempts(prev => {
+                    console.log('Previous failed attempts:', prev);
+                    const next = prev + 1;
+                    console.log(`❌ Failed attempt: ${next}`);
+
+                    if (next >= 5) {
+            storeCredentials(currentUser);
+
+                        console.log('🚫 User locked out after 5 failed login attempts.');
+                        setLoginError('Too many failed attempts. Please try again later.');
+                    } else {
+                        setLoginError('Invalid email or password. Please try again.');
+                    }
+
+                    return next;
+                });
+                return;
+            }
+
+            // If login success, reset attempts
+            setLoginAttempts(0);
+
+            const userData: User = {
+                email: currentUser.email,
+                firstName: currentUser.firstName,
+                lastName: currentUser.lastName,
+                phoneNumber: currentUser.phoneNumber,
+                password: currentUser.password,
+                confirmPassword: currentUser.confirmPassword,
+            };
+
+            await login(userData);
+            resetForm();
+            setLoginError('');
+        } catch (error) {
+            console.error('Login error:', error);
+            setLoginError('Something went wrong. Please try again.');
+        }
+    };
+
 
   return (
     <KeyboardAvoidingView
@@ -109,8 +197,8 @@ const LoginScreen: FC = () => {
       <View style={styles.flex}>
         <ImageBackground
           source={require('../assets/image/logo.png')}
-          style={styles.background}
-          imageStyle={styles.backgroundImage}
+          style={[styles.background, {backgroundColor: themeMode === 'light' ? theme.lightColors.background : theme.darkColors.background}]}
+          imageStyle={[styles.backgroundImage, {opacity: themeMode === 'light' ? 0.15 : 0.55}]}
         >
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -120,6 +208,7 @@ const LoginScreen: FC = () => {
               style={[
                 styles.formContainer,
                 {
+                     backgroundColor: themeMode === 'light' ? 'rgba(122, 117, 117, 0.18)' : 'rgba(15, 14, 14, 0.17)',
                   transform: [
                     {
                       translateY: fadeAnim.interpolate({
@@ -131,7 +220,7 @@ const LoginScreen: FC = () => {
                 },
               ]}
             >
-              <Text style={styles.title}>Login</Text>
+              <Text style={[styles.title, {color: themeMode === 'light' ? theme.lightColors.textPrimary : theme.darkColors.textPrimary }]}>Login</Text>
 
               <Formik
                 initialValues={{ email: '', password: '' }}
@@ -175,17 +264,17 @@ const LoginScreen: FC = () => {
                     )}
 
                     <TouchableOpacity
-                      onPress={handleSubmit as any}
+                      onPress={() => loginAttempts >= 5 ? handleBiometricLogin(currentUser) : handleSubmit()}
                       style={[styles.button, isSubmitting && styles.buttonDisabled]}
                       disabled={isSubmitting}
                     >
-                      <Text style={styles.buttonText}>
+                      <Text style={[styles.buttonText, {color: themeMode === 'light' ? theme.lightColors.textOnPrimary : theme.darkColors.textOnPrimary}]}>
                         {isSubmitting ? 'Logging in...' : 'Login'}
                       </Text>
                     </TouchableOpacity>
 
                     <View style={styles.registerContainer}>
-                      <Text style={styles.registerText}>Don't have an account? </Text>
+                      <Text style={[styles.registerText, {color : themeMode === 'light' ? theme.lightColors.textPrimary : theme.darkColors.textPrimary }]}>Don't have an account? </Text>
                       <TouchableOpacity onPress={() => navigateTo('register')}>
                         <Text style={styles.registerLink}>Register here</Text>
                       </TouchableOpacity>
@@ -212,6 +301,7 @@ interface AnimatedInputProps {
   touched: Partial<Record<keyof LoginFormValues, boolean>>;
   keyboardType?: 'default' | 'email-address';
   secureTextEntry?: boolean;
+  themeMode?: 'light' | 'dark';
 }
 
 const AnimatedInput: FC<AnimatedInputProps> = ({
@@ -224,6 +314,7 @@ const AnimatedInput: FC<AnimatedInputProps> = ({
   touched,
   keyboardType,
   secureTextEntry = false,
+  themeMode
 }) => {
   const borderAnim = useRef(new Animated.Value(0)).current;
 
@@ -248,14 +339,19 @@ const AnimatedInput: FC<AnimatedInputProps> = ({
     outputRange: ['#555', '#007BFF'],
   });
 
-  const labelColor = borderAnim.interpolate({
+  const labelColorlight = borderAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['#ddd', '#007BFF'],
   });
 
+    const labelColorDark = borderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['black', '#007BFF'],
+  });
+
   return (
     <Animated.View style={styles.animatedInputWrapper}>
-      <Animated.Text style={[styles.label, { color: labelColor }]}>
+      <Animated.Text style={[styles.label, { color: themeMode === 'light' ? labelColorlight : labelColorDark }]}>
         {label}
       </Animated.Text>
       <Animated.View style={[styles.inputContainer, { borderColor }]}>
@@ -288,8 +384,8 @@ const AnimatedInput: FC<AnimatedInputProps> = ({
 // ---- Styles ----
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  background: { flex: 1, justifyContent: 'flex-start', width: '100%', height: '100%' },
-  backgroundImage: { resizeMode: 'contain', alignSelf: 'center', opacity: 0.15 },
+  background: { flex: 1, justifyContent: 'center', width: '100%', height: '100%', },
+  backgroundImage: { resizeMode: 'contain', alignSelf: 'center',  },
   scrollContent: {
     padding: 20,
     flex: 1,
@@ -363,7 +459,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   registerText: { color: 'white', fontSize: 14 },
-  registerLink: { color: '#3a628fff', fontSize: 14, fontWeight: 'bold' },
+  registerLink: { color: '#007BFF', fontSize: 14, fontWeight: 'bold' },
 });
 
 export default LoginScreen;
