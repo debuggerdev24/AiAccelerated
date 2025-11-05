@@ -351,7 +351,7 @@ const AnimatedInput: FC<AnimatedInputProps> = ({
 
   return (
     <Animated.View style={styles.animatedInputWrapper}>
-      <Animated.Text style={[styles.label, { color: themeMode === 'light' ? labelColorlight : labelColorDark }]}>
+      <Animated.Text style={[styles.label, { color: themeMode !== 'light' ? labelColorlight : labelColorDark }]}>
         {label}
       </Animated.Text>
       <Animated.View style={[styles.inputContainer, { borderColor }]}>
